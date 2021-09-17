@@ -1,3 +1,4 @@
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.io.*
@@ -11,9 +12,9 @@ class Server constructor() {
     private val clientSockets = mutableMapOf<String, CustomSocket>()
 
     suspend fun run() = coroutineScope {
-        launch { getInfo() }
-        launch { publicSocketListener() }
-        launch { clientSocketsListener() }
+        launch(Dispatchers.IO) { getInfo() }
+        launch(Dispatchers.IO) { publicSocketListener() }
+        launch(Dispatchers.IO) { clientSocketsListener() }
 
 
     }

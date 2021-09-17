@@ -1,3 +1,4 @@
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.io.*
@@ -13,9 +14,9 @@ class Client constructor(hostAddress: String, hostPort: Int, private var nicknam
     private var isOpened = true
 
     suspend fun run() = coroutineScope {
-        launch { start() }
-        launch { handleIncoming() }
-        launch { handleSent() }
+        val startJob = launch(Dispatchers.IO) { start() }
+        val inJob = launch(Dispatchers.IO) { handleIncoming() }
+        val outJob = launch(Dispatchers.IO) { handleSent() }
     }
 
     private fun start() {
@@ -32,11 +33,8 @@ class Client constructor(hostAddress: String, hostPort: Int, private var nicknam
     }
 
     private fun handleSent() {
-        print("outs while")
         while (isOpened and !socket.isClosed) {
-            print("in while")
             val msg = scanner.next()
-            println(msg)
             if (msg.toLowerCase() == "quit") isOpened = false
             writer.write(msg)
             writer.newLine()
