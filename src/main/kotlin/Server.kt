@@ -1,21 +1,20 @@
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import java.io.*
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 import java.text.SimpleDateFormat
 import java.util.*
 
-class Server constructor() {
+class Server {
+    //TODO IOException
     private var publicSocket: ServerSocket = ServerSocket(9876) //autoallocated
     private val clientSockets = mutableMapOf<String, CustomSocket>()
-
+    private val clientScope = CoroutineScope(Dispatchers.IO)
+    private val sdf = SimpleDateFormat("hh.mm.ss")
     suspend fun run() = coroutineScope {
-        launch(Dispatchers.IO) { getInfo() }
-        launch(Dispatchers.IO) { publicSocketListener() }
-        launch(Dispatchers.IO) { clientSocketsListener() }
-
+        launch (Dispatchers.Default) { getInfo() }
+        launch (Dispatchers.IO) { publicSocketListener() }
 
     }
 
@@ -28,8 +27,16 @@ class Server constructor() {
                 val writer = socket.writer
                 val nickname = reader.readLine()
                 println("$nickname is connecting")
+                if (!nickname.matches(Regex("""[\w\d]+"""))) {
+                    writer.write("Sorry, this nickname is incorrect. It can consist only of any combination of letters and digits.")
+                    writer.newLine()
+                    writer.flush()
+
+                    reader.close()
+                    writer.close()
+                    socket.socket.close()
+                }
                 if (clientSockets.containsKey(nickname)) {
-                    println("Sorry, this nickname is already taken. Choose another one.")
                     writer.write("Sorry, this nickname is already taken. Choose another one.")
                     writer.newLine()
                     writer.flush()
@@ -38,11 +45,15 @@ class Server constructor() {
                     writer.close()
                     socket.socket.close()
                 } else {
-                    println("normal connection")
-                    writer.write("Connected successfully.")
+                    val date = Date()
+                    val timeStr = sdf.format(date)
+                    val customMsg = CustomMsg(timeStr, "Server", "Hello, $nickname, you are connected!", "", "")
+                    writer.write(customMsg.toString())
                     writer.newLine()
                     writer.flush()
                     clientSockets[nickname] = socket
+                    clientScope.launch { clientSocketListener(nickname, socket) }
+                    println("coroutine launched for $nickname")
                 }
             } catch (e:IOException) {
                 println("Someone tried to connect, but unsuccessfully.")
@@ -50,26 +61,50 @@ class Server constructor() {
         }
     }
 
-    private fun clientSocketsListener() {
-        while (true) {
-            for (pair in clientSockets) {
-                val customSocket = pair.value
-                if (customSocket.socket.isClosed) clientSockets.remove(pair.key)
-                if (customSocket.reader.ready()) sendMessage(pair.key, customSocket.reader.readText())
-            }
-        }
-    }
+    private fun clientSocketListener(nickname: String, socket: CustomSocket) {
+        println("listening for $nickname")
 
-    private fun sendMessage(nickname: String, message: String) {
-        val date = Date()
-        val sdf = SimpleDateFormat("hh:mm:ss")
-        val timeStr = sdf.format(date)
-        for (pair in clientSockets) {
-            val writer = pair.value.writer
-            writer.write("$timeStr <$nickname>: $message")
-            writer.newLine()
-            writer.flush()
+        val regex = Regex("""^time: "\d\d\.\d\d\.\d\d";name: "[\w\d]+";msg: ".+";attname: ".*";att: ".*"$""")
+        while (socket.socket.isConnected) {
+            val splittedMsg = mutableListOf<String>()
+            for (i in 0 until 3) {
+                try {
+                    val msg = socket.reader.readLine()
+                    splittedMsg.add(msg)
+                } catch (e: SocketException) {
+                    println("$nickname disconnected.")
+                    break
+                }
+            }
+
+            val date = Date()
+            val timeStr = sdf.format(date)
+            val customMsg = CustomMsg(timeStr, nickname, "", "", "")
+
+            for (attr in splittedMsg) {
+                val splitted = attr.split(":\\s".toRegex()).toTypedArray()
+                val type = splitted.first().toString()
+                val value = splitted.last().toString().substring(1, splitted.last().length - 1) //removing the ""
+
+                when (type) {
+                    "msg" -> customMsg.msg = value
+                    "attname" -> customMsg.attname = value
+                    "att" -> customMsg.att = value
+                }
+            }
+
+            val resString = customMsg.toString()
+            for (pair in clientSockets) {
+                val writer = pair.value.writer
+                println("wrote:\n$resString")
+                writer.write(resString)
+                writer.newLine()
+                writer.flush()
+            }
+
+
         }
+        clientSockets.remove(nickname) //out of loop - socket closed
     }
 
     private fun getInfo() {
@@ -80,5 +115,11 @@ class Server constructor() {
     data class CustomSocket constructor (val socket: Socket) {
         val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
         val writer= BufferedWriter(OutputStreamWriter(socket.getOutputStream()))
+    }
+
+    data class CustomMsg constructor(var time: String, var name: String, var msg: String, var attname: String, var att: String) {
+        override fun toString(): String {
+            return "time: \"$time\"\nname: \"$name\"\nmsg: \"$msg\"\nattname: \"$attname\"\natt: \"$att\""
+        }
     }
 }
